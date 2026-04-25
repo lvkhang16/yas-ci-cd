@@ -1,3 +1,5 @@
+def changedServices = []
+
 pipeline {
   agent any
 
@@ -55,7 +57,7 @@ pipeline {
             }
           }
 
-          def changedServices = []
+          def detectedServices = []
           for (service in allServices) {
             boolean serviceChanged = false
             for (filePath in changedFiles) {
@@ -65,12 +67,11 @@ pipeline {
               }
             }
             if (serviceChanged) {
-              changedServices << service
+              detectedServices << service
             }
           }
+          changedServices = detectedServices
           def changedServicesValue = changedServices ? changedServices.join(' ') : ''
-
-          env.CHANGED_SERVICES = changedServicesValue
           echo "Changed files: ${changedFiles}"
 
           if (changedServices.size() > 0) {
@@ -85,22 +86,22 @@ pipeline {
     stage('Build Service JARs') {
       steps {
         script {
-          def services = (env.CHANGED_SERVICES ?: '').tokenize(' ')
-          if (services.isEmpty()) {
+          if (changedServices.isEmpty()) {
             echo 'No changed services to build JARs for. Skipping Maven build.'
             return
           }
 
-          for (service in services) {
+          for (service in changedServices) {
             if (!fileExists("${service}/pom.xml")) {
               echo "Skipping ${service}: pom.xml not found."
               continue
             }
 
-            if (fileExists("${service}/mvnw")) {
+            if (fileExists("${service}/mvnw") && fileExists("${service}/.mvn/wrapper/maven-wrapper.properties")) {
               sh """
-                chmod +x ./${service}/mvnw
-                ./${service}/mvnw -f ./${service}/pom.xml -B clean package -DskipTests
+                cd ./${service}
+                chmod +x ./mvnw
+                ./mvnw -B clean package -DskipTests
               """
             } else {
               sh "mvn -f ./${service}/pom.xml -B clean package -DskipTests"
@@ -113,8 +114,7 @@ pipeline {
     stage('Build and Push Images') {
       steps {
         script {
-          def services = (env.CHANGED_SERVICES ?: '').tokenize(' ')
-          if (services.isEmpty()) {
+          if (changedServices.isEmpty()) {
             echo 'No changed services to build. Skipping image build and push.'
             return
           }
@@ -126,7 +126,12 @@ pipeline {
           )]) {
             sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
 
-            for (service in services) {
+            for (service in changedServices) {
+              if (!fileExists("${service}/Dockerfile")) {
+                echo "Skipping ${service}: Dockerfile not found."
+                continue
+              }
+
               sh """
                 docker build -t ${DOCKERHUB_USER}/${service}:${COMMIT_ID} -f ./${service}/Dockerfile ./${service}
                 docker push ${DOCKERHUB_USER}/${service}:${COMMIT_ID}
@@ -152,7 +157,7 @@ pipeline {
 
     success {
       script {
-        def changedServicesValue = env.CHANGED_SERVICES ?: ''
+        def changedServicesValue = changedServices ? changedServices.join(' ') : ''
         if (changedServicesValue) {
           echo "Images pushed with tag: ${env.COMMIT_ID}"
           echo "Built services: ${changedServicesValue}"
