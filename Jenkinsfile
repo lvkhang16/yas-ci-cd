@@ -31,7 +31,7 @@ pipeline {
     stage('Detect Changed Services') {
       steps {
         script {
-          def allServices = env.SERVICES.split()
+          def allServices = (env.SERVICES ?: '').tokenize(' ')
           def changedOutput = sh(
             script: '''
               set -e
@@ -46,18 +46,36 @@ pipeline {
             returnStdout: true
           ).trim()
 
-          def changedFiles = changedOutput ? changedOutput.split('\n') : []
-          def changedServices = allServices.findAll { service ->
-            changedFiles.any { filePath ->
-              filePath == service || filePath.startsWith("${service}/")
+          def changedFiles = []
+          if (changedOutput) {
+            for (line in changedOutput.split('\n')) {
+              def filePath = line.trim()
+              if (filePath) {
+                changedFiles << filePath
+              }
             }
           }
 
-          env.CHANGED_SERVICES = changedServices.join(' ')
+          def changedServices = []
+          for (service in allServices) {
+            boolean serviceChanged = false
+            for (filePath in changedFiles) {
+              if (filePath == service || filePath.startsWith("${service}/")) {
+                serviceChanged = true
+                break
+              }
+            }
+            if (serviceChanged) {
+              changedServices << service
+            }
+          }
+          def changedServicesValue = changedServices ? changedServices.join(' ') : ''
+
+          env.CHANGED_SERVICES = changedServicesValue
           echo "Changed files: ${changedFiles}"
 
-          if (changedServices) {
-            echo "Services to build: ${env.CHANGED_SERVICES}"
+          if (changedServices.size() > 0) {
+            echo "Services to build: ${changedServicesValue}"
           } else {
             echo 'No matching service changes found in SERVICES list.'
           }
@@ -80,7 +98,7 @@ pipeline {
           sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
 
           script {
-            def services = env.CHANGED_SERVICES.split()
+            def services = (env.CHANGED_SERVICES ?: '').tokenize(' ')
             for (service in services) {
               sh """
                 docker build -t ${DOCKERHUB_USER}/${service}:${COMMIT_ID} -f ./${service}/Dockerfile .
