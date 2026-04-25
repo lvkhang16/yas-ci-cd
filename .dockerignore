@@ -1,0 +1,5 @@
+.git
+**/target          # Maven build output
+**/*.md
+**/node_modules
+jenkins/
