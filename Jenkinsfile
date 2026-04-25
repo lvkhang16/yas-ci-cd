@@ -6,7 +6,6 @@ pipeline {
       // List of services you're building
       // Check your actual folder names in the YAS repo
       SERVICES = 'tax product'
-      CHANGED_SERVICES = ''
   }
 
   stages {
@@ -125,9 +124,10 @@ pipeline {
 
     success {
       script {
-        if (env.CHANGED_SERVICES?.trim()) {
+        def changedServicesValue = env.CHANGED_SERVICES ?: ''
+        if (changedServicesValue) {
           echo "Images pushed with tag: ${env.COMMIT_ID}"
-          echo "Built services: ${env.CHANGED_SERVICES}"
+          echo "Built services: ${changedServicesValue}"
         } else {
           echo 'No listed service changes detected. Skipped image build and push.'
         }
