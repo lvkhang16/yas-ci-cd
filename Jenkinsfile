@@ -3,6 +3,11 @@ def changedServices = []
 pipeline {
   agent any
 
+  tools {
+    maven 'maven-3.9'
+    jdk 'jdk-21' 
+  }
+
   environment {
       DOCKERHUB_USER = 'lvkhang16'
       // List of services you're building
@@ -91,22 +96,23 @@ pipeline {
             return
           }
 
+          def buildableServices = []
           for (service in changedServices) {
             if (!fileExists("${service}/pom.xml")) {
               echo "Skipping ${service}: pom.xml not found."
               continue
             }
-
-            if (fileExists("${service}/mvnw") && fileExists("${service}/.mvn/wrapper/maven-wrapper.properties")) {
-              sh """
-                cd ./${service}
-                chmod +x ./mvnw
-                ./mvnw -B clean package -DskipTests
-              """
-            } else {
-              sh "mvn -f ./${service}/pom.xml -B clean package -DskipTests"
-            }
+            buildableServices << service
           }
+
+          if (buildableServices.isEmpty()) {
+            echo 'No valid Maven modules to build. Skipping Maven build.'
+            return
+          }
+
+          def modules = buildableServices.join(',')
+          echo "Building Maven modules: ${modules}"
+          sh "mvn -f pom.xml -B clean install -pl ${modules} -am -DskipTests"
         }
       }
     }
