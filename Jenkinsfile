@@ -84,21 +84,21 @@ pipeline {
     }
 
     stage('Build and Push Images') {
-      when {
-        expression {
-          return env.CHANGED_SERVICES?.trim()
-        }
-      }
       steps {
-        withCredentials([usernamePassword(
-          credentialsId: 'dockerhub-creds',
-          usernameVariable: 'DOCKER_USER',
-          passwordVariable: 'DOCKER_PASS'
-        )]) {
-          sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+        script {
+          def services = (env.CHANGED_SERVICES ?: '').tokenize(' ')
+          if (services.isEmpty()) {
+            echo 'No changed services to build. Skipping image build and push.'
+            return
+          }
 
-          script {
-            def services = (env.CHANGED_SERVICES ?: '').tokenize(' ')
+          withCredentials([usernamePassword(
+            credentialsId: 'dockerhub-creds',
+            usernameVariable: 'DOCKER_USER',
+            passwordVariable: 'DOCKER_PASS'
+          )]) {
+            sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+
             for (service in services) {
               sh """
                 docker build -t ${DOCKERHUB_USER}/${service}:${COMMIT_ID} -f ./${service}/Dockerfile .
