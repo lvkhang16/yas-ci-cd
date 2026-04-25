@@ -82,6 +82,34 @@ pipeline {
       }
     }
 
+    stage('Build Service JARs') {
+      steps {
+        script {
+          def services = (env.CHANGED_SERVICES ?: '').tokenize(' ')
+          if (services.isEmpty()) {
+            echo 'No changed services to build JARs for. Skipping Maven build.'
+            return
+          }
+
+          for (service in services) {
+            if (!fileExists("${service}/pom.xml")) {
+              echo "Skipping ${service}: pom.xml not found."
+              continue
+            }
+
+            if (fileExists("${service}/mvnw")) {
+              sh """
+                chmod +x ./${service}/mvnw
+                ./${service}/mvnw -f ./${service}/pom.xml -B clean package -DskipTests
+              """
+            } else {
+              sh "mvn -f ./${service}/pom.xml -B clean package -DskipTests"
+            }
+          }
+        }
+      }
+    }
+
     stage('Build and Push Images') {
       steps {
         script {
@@ -100,7 +128,7 @@ pipeline {
 
             for (service in services) {
               sh """
-                docker build -t ${DOCKERHUB_USER}/${service}:${COMMIT_ID} -f ./${service}/Dockerfile .
+                docker build -t ${DOCKERHUB_USER}/${service}:${COMMIT_ID} -f ./${service}/Dockerfile ./${service}
                 docker push ${DOCKERHUB_USER}/${service}:${COMMIT_ID}
               """
 
