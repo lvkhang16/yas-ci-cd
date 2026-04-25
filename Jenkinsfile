@@ -6,6 +6,7 @@ pipeline {
       // List of services you're building
       // Check your actual folder names in the YAS repo
       SERVICES = 'tax product'
+      CHANGED_SERVICES = ''
   }
 
   stages {
@@ -27,7 +28,49 @@ pipeline {
       }
     }
 
+    stage('Detect Changed Services') {
+      steps {
+        script {
+          def allServices = env.SERVICES.split()
+          def changedOutput = sh(
+            script: '''
+              set -e
+              if [ -n "$GIT_PREVIOUS_SUCCESSFUL_COMMIT" ] && git rev-parse --verify "$GIT_PREVIOUS_SUCCESSFUL_COMMIT" >/dev/null 2>&1; then
+                git diff --name-only "$GIT_PREVIOUS_SUCCESSFUL_COMMIT" HEAD
+              elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+                git diff --name-only HEAD~1 HEAD
+              else
+                git ls-tree --name-only -r HEAD
+              fi
+            ''',
+            returnStdout: true
+          ).trim()
+
+          def changedFiles = changedOutput ? changedOutput.split('\n') : []
+          def changedServices = allServices.findAll { service ->
+            changedFiles.any { filePath ->
+              filePath == service || filePath.startsWith("${service}/")
+            }
+          }
+
+          env.CHANGED_SERVICES = changedServices.join(' ')
+          echo "Changed files: ${changedFiles}"
+
+          if (changedServices) {
+            echo "Services to build: ${env.CHANGED_SERVICES}"
+          } else {
+            echo 'No matching service changes found in SERVICES list.'
+          }
+        }
+      }
+    }
+
     stage('Build and Push Images') {
+      when {
+        expression {
+          return env.CHANGED_SERVICES?.trim()
+        }
+      }
       steps {
         withCredentials([usernamePassword(
           credentialsId: 'dockerhub-creds',
@@ -37,7 +80,7 @@ pipeline {
           sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
 
           script {
-            def services = env.SERVICES.split()
+            def services = env.CHANGED_SERVICES.split()
             for (service in services) {
               sh """
                 docker build -t ${DOCKERHUB_USER}/${service}:${COMMIT_ID} -f ./${service}/Dockerfile .
@@ -59,11 +102,18 @@ pipeline {
 
   post {
     always {
-      sh 'docker logout'
+      sh 'docker logout || true'
     }
 
     success {
-      echo "Images pushed with tag: ${env.COMMIT_ID}"
+      script {
+        if (env.CHANGED_SERVICES?.trim()) {
+          echo "Images pushed with tag: ${env.COMMIT_ID}"
+          echo "Built services: ${env.CHANGED_SERVICES}"
+        } else {
+          echo 'No listed service changes detected. Skipped image build and push.'
+        }
+      }
     }
 
     failure {
